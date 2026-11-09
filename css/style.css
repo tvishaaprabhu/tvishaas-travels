@@ -111,7 +111,6 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 body.mode-map .masthead { display: none; }
 #map-view { position: fixed; inset: var(--bar-h) 0 0 0; padding: 0 var(--pad) var(--pad); }
 #map { width: 100%; height: 100%; border-radius: 18px; background: var(--blue); box-shadow: inset 0 0 0 1px rgba(70,58,107,.06); }
-#map .leaflet-tile-pane { filter: url(#pastel-map); }
 .map-note {
   position: absolute; left: calc(var(--pad) + 14px); bottom: calc(var(--pad) + 14px); z-index: 500; margin: 0;
   padding: 7px 14px; border-radius: 999px; font-size: 12px; font-weight: 600;

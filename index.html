@@ -54,16 +54,10 @@
     <button class="lb-next" aria-label="Next">&#8250;</button>
   </div>
 
-  <!-- Recolours the map tiles into the pastel palette -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-    <filter id="pastel-map" color-interpolation-filters="sRGB">
-      <feColorMatrix type="saturate" values="0"/>
-      <feComponentTransfer id="pastel-map-ct"><feFuncR type="table"/><feFuncG type="table"/><feFuncB type="table"/></feComponentTransfer>
-    </filter>
-  </svg>
 
   <script src="vendor/leaflet/leaflet.js"></script>
   <script src="vendor/leaflet/leaflet.markercluster.js"></script>
+  <script src="vendor/world/topojson-client.min.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
