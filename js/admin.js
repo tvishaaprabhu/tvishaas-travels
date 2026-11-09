@@ -1,5 +1,5 @@
 import exifr from '../vendor/exifr/exifr.mjs';
-import { EXIF_PICK, HOUR, toMs, fromMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode, forwardGeocode, dhash, looksDuplicate, duplicateGroups, HASH_W, HASH_H } from './locate.js';
+import { EXIF_PICK, toMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode, forwardGeocode } from './locate.js';
 
 // ---------- config ----------
 // On GitHub Pages (https://<owner>.github.io/<repo>/) the repo is detected automatically.
@@ -168,23 +168,7 @@ async function sha1(buf) {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
 }
 
-// Visual fingerprint (see dhash in locate.js) from anything drawable
-function hashOf(pic) {
-  const c = document.createElement('canvas');
-  c.width = HASH_W; c.height = HASH_H;
-  const g = c.getContext('2d', { willReadFrequently: true });
-  g.imageSmoothingQuality = 'high';
-  g.drawImage(pic, 0, 0, HASH_W, HASH_H);
-  const d = g.getImageData(0, 0, HASH_W, HASH_H).data;
-  const gray = new Array(HASH_W * HASH_H);
-  for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
-  return dhash(gray);
-}
-async function fingerprintUrl(url) {
-  const pic = new Image(); pic.src = url; await pic.decode();
-  return hashOf(pic);
-}
-// Decode a photo once: small preview for the card (keeps memory low with big batches) + fingerprint
+// Small preview for the card (keeps memory low with big batches)
 async function analyse(file) {
   const full = await createImageBitmap(file, { imageOrientation: 'from-image' });
   const aspect = full.width / full.height;
@@ -198,9 +182,9 @@ async function analyse(file) {
   if (small !== full) small.close?.();
   full.close?.();
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
-  return { phash: hashOf(c), aspect, preview: URL.createObjectURL(blob) };
+  return { preview: URL.createObjectURL(blob) };
 }
-const skip = (i) => i.dupe || i.lookalike; // exact copy, or looks like one
+const skip = (i) => i.dupe; // exact copy of a photo already on the site or in this batch
 
 // Resize with good quality (halving steps), returns { blob, w, h }. Output has no metadata.
 async function resize(file, maxW, maxH, quality) {
@@ -226,7 +210,6 @@ async function resize(file, maxW, maxH, quality) {
 
 // ---------- add photos ----------
 let items = [];          // photos being added
-const clockFix = {};     // camera -> hours
 
 $('#files').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
 const drop = $('#drop');
@@ -247,7 +230,7 @@ async function addFiles(files) {
     let fp = {};
     try { fp = await analyse(file); } catch {}
     items.push({
-      file, id, raw: meta, camera: meta.camera, phash: fp.phash || null, aspect: fp.aspect, preview: fp.preview || URL.createObjectURL(file),
+      file, id, raw: meta, camera: meta.camera, preview: fp.preview || URL.createObjectURL(file),
       dupe: known.has(id), place: '', country: '', caption: '', edited: {},
     });
     known.add(id);
@@ -256,21 +239,13 @@ async function addFiles(files) {
   await locateAll();
 }
 
-// Work out dates (with clock fixes) and locations for everything in the batch
+// Work out locations for everything in the batch
 async function locateAll() {
   for (const it of items) {
-    const fix = +clockFix[it.camera] || 0;
-    it.date = it.raw.date && fix ? fromMs(toMs(it.raw.date) + fix * HOUR) : it.raw.date;
+    it.date = it.raw.date;
     it.lat = it.raw.lat; it.lng = it.raw.lng; it.approx = false;
     if (!it.edited.place) it.place = '';
     if (!it.edited.country) it.country = '';
-  }
-  // look-alikes of photos already on the site, or earlier in this batch
-  for (const [k, it] of items.entries()) {
-    it.lookalike = false;
-    if (it.dupe || it.keep) continue;
-    const twin = manifest.find((p) => looksDuplicate(it, p)) || items.slice(0, k).find((q) => !skip(q) && looksDuplicate(it, q));
-    if (twin) { it.lookalike = true; it.twin = twin.place ? `a photo from ${twin.place}` : twin.file ? twin.file.name : 'a photo on the site'; }
   }
   const live = items.filter((i) => !skip(i));
   // names for photos with GPS: reuse a nearby name first, then look up online
@@ -303,8 +278,7 @@ async function locateAll() {
 }
 
 function badgeFor(it) {
-  if (it.dupe) return ['dupe', 'Already on the site'];
-  if (it.lookalike) return ['dupe', 'Looks like a duplicate'];
+  if (it.dupe) return ['dupe', 'Exact copy, skipped'];
   if (it.error) return ['err', it.error];
   if (it.lat != null && !it.approx) return ['gps', 'GPS'];
   if (it.approx) return ['approx', 'Matched by time'];
@@ -326,15 +300,7 @@ function renderAdd() {
     badges.append(el('span', `badge ${cls}`, txt));
     img.append(x, badges);
     card.append(img);
-    if (it.lookalike) {
-      card.classList.add('deleted');
-      const body = el('div', 'pc-body');
-      body.append(el('p', 'pc-note', `Looks the same as ${it.twin} and was taken at the same moment, so it won't be published.`));
-      const keep = el('button', 'btn ghost', 'Keep anyway');
-      keep.onclick = () => { it.keep = true; locateAll(); };
-      body.append(keep);
-      card.append(body);
-    } else if (!it.dupe) {
+    if (!it.dupe) {
       const body = el('div', 'pc-body');
       body.append(el('div', 'pc-date', `${fmtDate(it.date)} · ${it.camera}`));
       const row = el('div', 'pc-row');
@@ -344,7 +310,6 @@ function renderAdd() {
     }
     list.append(card);
   }
-  renderCams();
   const noLoc = items.filter((i) => !skip(i) && i.lat == null && !i.place);
   $('#batch-place').hidden = !noLoc.length;
   $('#bp-count').textContent = `${noLoc.length} photo${noLoc.length === 1 ? ' has' : 's have'} no location.`;
@@ -365,27 +330,6 @@ function input(obj, key, ph, onChange) {
     onChange?.(i);
   };
   return i;
-}
-
-function renderCams() {
-  const live = items.filter((i) => !skip(i));
-  const cams = [...new Set(live.filter((i) => i.raw.lat == null && i.raw.date).map((i) => i.camera))];
-  const box = $('#cams');
-  box.hidden = !cams.length;
-  if (!cams.length) return;
-  if (box.dataset.cams === cams.join('|')) return; // don't rebuild while typing
-  box.dataset.cams = cams.join('|');
-  box.innerHTML = '';
-  box.append(el('h3', null, 'Camera clocks'), el('p', null, "Photos without GPS are matched to your phone photos by time. If a camera's clock was wrong (e.g. still on home time), enter how many hours to add or subtract."));
-  for (const cam of cams) {
-    const row = el('div', 'cam-row');
-    const n = live.filter((i) => i.camera === cam).length;
-    row.append(el('b', null, cam), el('span', null, `${n} photo${n === 1 ? '' : 's'} · clock fix (hours)`));
-    const inp = el('input'); inp.type = 'number'; inp.step = '0.5'; inp.value = clockFix[cam] || 0;
-    inp.onchange = () => { clockFix[cam] = +inp.value || 0; locateAll(); };
-    row.append(inp);
-    box.append(row);
-  }
 }
 
 $('#batch-place').onsubmit = (e) => {
@@ -425,7 +369,6 @@ $('#publish').onclick = async () => {
       }
       if (coords.get(q)) Object.assign(it, coords.get(q), { approx: true });
     }
-    const kept = new Set(todo.filter((i) => i.keep).map((i) => i.id));
     const clean = (v) => (v == null ? '' : String(v)).trim() || null;
 
     for (let start = 0; start < todo.length; start += CHUNK) {
@@ -447,7 +390,7 @@ $('#publish').onclick = async () => {
         entries.push({
           id: it.id, src: it.file.name, thumb, large, w: t.w, h: t.h, date: it.date,
           lat: it.lat, lng: it.lng, place: clean(it.place), country: clean(it.country),
-          caption: clean(it.caption), camera: it.camera, phash: it.phash, ...(it.approx ? { approx: true } : {}),
+          caption: clean(it.caption), camera: it.camera, ...(it.approx ? { approx: true } : {}),
         });
       }
       if (!entries.length) continue;
@@ -455,8 +398,8 @@ $('#publish').onclick = async () => {
       const range = todo.length > CHUNK ? ` (${start + 1}–${Math.min(start + CHUNK, todo.length)} of ${todo.length})` : '';
       await commit(`Add ${entries.length} photo${entries.length === 1 ? '' : 's'}`, (cur) => {
         const ids = new Set(cur.map((p) => p.id));
-        // last check in case the same photos were just published from another device
-        fresh = entries.filter((e) => !ids.has(e.id) && (kept.has(e.id) || !cur.some((p) => looksDuplicate(e, p))));
+        // last check in case the same files were just published from another device
+        fresh = entries.filter((e) => !ids.has(e.id));
         const next = [...cur, ...fresh].sort((a, b) => (toMs(a.date) || 0) - (toMs(b.date) || 0));
         return { manifest: next, files: files.filter((f) => fresh.some((e) => f.path.includes(e.id))) };
       }, (msg) => toast(msg + range, false, 0));
@@ -483,15 +426,11 @@ $('#publish').onclick = async () => {
 // ---------- manage ----------
 let changes = new Map(); // id -> { place, country, caption, deleted }
 
-let dupView = null; // ids to show while reviewing duplicates, in group order
-
 function renderManage() {
   const q = $('#search').value.trim().toLowerCase();
   const list = $('#m-list');
   list.innerHTML = '';
-  $('#find-dupes').textContent = dupView ? 'Show all photos' : 'Find duplicates';
-  const byId = new Map(manifest.map((p) => [p.id, p]));
-  const shown = (dupView ? dupView.map((id) => byId.get(id)).filter(Boolean) : manifest.slice().reverse()).filter((p) =>
+  const shown = manifest.slice().reverse().filter((p) =>
     !q || [p.place, p.country, p.caption, p.date, fmtDate(p.date)].some((v) => v && String(v).toLowerCase().includes(q)));
   $('#m-count').textContent = `${shown.length} of ${manifest.length} photos`;
   for (const p of shown.slice(0, 300)) list.append(manageCard(p));
@@ -550,27 +489,7 @@ function updateManageDock() {
 }
 
 $('#search').oninput = () => renderManage();
-$('#find-dupes').onclick = async () => {
-  if (dupView) { dupView = null; renderManage(); return; }
-  const btn = $('#find-dupes');
-  btn.disabled = true;
-  try {
-    // older photos may not have a fingerprint yet: work it out from their thumbnail
-    const missing = manifest.filter((p) => !p.phash);
-    for (const [n, p] of missing.entries()) {
-      toast(`Checking photos… ${n + 1}/${missing.length}`, false, 0);
-      try { p.phash = await fingerprintUrl(p.thumb); } catch {}
-    }
-    const groups = duplicateGroups(manifest);
-    if (!groups.length) { toast('✿ No duplicates found.', false, 5000); return; }
-    for (const g of groups) for (const p of g.slice(1)) { const c = changes.get(p.id) || {}; c.deleted = true; changes.set(p.id, c); }
-    dupView = groups.flat().map((p) => p.id);
-    const extra = dupView.length - groups.length;
-    toast(`Found ${groups.length} set${groups.length === 1 ? '' : 's'} of duplicates. ${extra} extra cop${extra === 1 ? 'y is' : 'ies are'} marked for deletion: check, then Save changes.`, false, 9000);
-    renderManage();
-  } finally { btn.disabled = false; }
-};
-$('#m-undo').onclick = () => { changes = new Map(); dupView = null; renderManage(); };
+$('#m-undo').onclick = () => { changes = new Map(); renderManage(); };
 $('#m-save').onclick = async () => {
   const pend = new Map(pendingChanges());
   if (!pend.size) return;
@@ -605,7 +524,6 @@ $('#m-save').onclick = async () => {
       return { manifest: next, deletes };
     }, (m) => toast(m, false, 0));
     changes = new Map();
-    dupView = null;
     renderManage();
     toast('✿ Saved! The site updates in about a minute.', false, 7000);
   } catch (e) {

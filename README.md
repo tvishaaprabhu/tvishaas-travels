@@ -29,19 +29,13 @@ location on the map is public.
 in the Photos picker tap *Options* → turn on *Location*, or just type the place name.
 
 ## Duplicates
-- Uploading the exact same file twice: skipped ("Already on the site").
-- A copy that *looks* the same and was taken at the same moment (re-saved, resized, sent via WhatsApp, exported twice)
-  is marked "Looks like a duplicate" and skipped. Tap **Keep anyway** if it's actually a different shot (e.g. a burst).
-- **Manage → Find duplicates** scans the whole site, keeps the best copy of each (real GPS > caption > place),
-  marks the rest for deletion, and you confirm with **Save changes**.
-- The bulk import skips look-alikes the same way.
+Uploading the exact same file again is skipped ("Exact copy, skipped"). Nothing else is treated as a duplicate.
 
 ## How locations are worked out
 - Photos with GPS: the city/country is looked up on OpenStreetMap (or reused from a nearby photo).
 - Photos without GPS (e.g. a digital camera) borrow the location of GPS photos taken around the same time:
   if the GPS photos just before and after are in the same place, or one is within 6 hours.
   Otherwise they stay off the map (still in the grid). Typing a place name puts them on the map.
-- **Camera clock wrong?** The admin page shows a "clock fix" box per camera when needed.
 
 ## Bulk import (big batches, from a computer)
 ```bash
@@ -50,11 +44,10 @@ npm install
 npm run import
 git add -A && git commit -m "Add photos" && git push
 ```
-Camera clock corrections for bulk imports go in `scripts/camera-clocks.json` (hours, e.g. `"Canon PowerShot SX620 HS": -5`).
 
 ## Space
 GitHub Pages sites can be up to about 1 GB. Each photo takes roughly 0.6 MB (a thumbnail + a 2000px copy),
-so there's room for about 1,500 photos. Manage → Find duplicates helps keep it tidy.
+so there's room for about 1,500 photos.
 
 ## Files
 - `photos.json`: the list of photos (source of truth; the admin page edits it).

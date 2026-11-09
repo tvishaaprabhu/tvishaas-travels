@@ -59,13 +59,6 @@ details a { color: var(--rose-dk); }
 .drop-title { font: italic 600 26px var(--serif); font-variation-settings: "SOFT" 100; }
 .drop-sub { color: var(--muted); font-size: 14px; max-width: 460px; }
 
-.cams { margin: 22px 0 0; padding: 18px 20px; border-radius: 18px; background: #FDF3D3; color: var(--mimosa-dk); }
-.cams h3 { margin: 0 0 4px; font: italic 600 20px var(--serif); color: var(--ink); }
-.cams p { margin: 0 0 12px; font-size: 14px; }
-.cam-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid rgba(107, 84, 20, .12); font-size: 14px; }
-.cam-row b { color: var(--ink); min-width: 180px; }
-.cam-row input { width: 90px; }
-
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 22px; }
 .pc { background: #fff; border-radius: 18px; overflow: hidden; box-shadow: 0 10px 30px -18px rgba(70, 58, 107, .4); display: flex; flex-direction: column; transition: opacity .2s; }
 .pc.deleted { opacity: .45; }
@@ -87,10 +80,6 @@ details a { color: var(--rose-dk); }
 
 .m-bar { display: flex; align-items: center; gap: 14px; }
 .m-bar input { max-width: 460px; }
-.m-bar #find-dupes { margin-left: auto; white-space: nowrap; }
-.pc.deleted .btn { justify-self: start; }
-.pc-note { margin: 0; font-size: 13px; color: var(--ink); }
-.pc.deleted:has(.pc-note) { opacity: .8; }
 
 .dock {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60;

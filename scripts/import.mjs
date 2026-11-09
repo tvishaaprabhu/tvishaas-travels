@@ -5,19 +5,18 @@
 //   npm run import -- --offline   -> skip the place-name lookup
 //
 // photos.json is the site's source of truth; this script only ADDS to it and never
-// changes photos already there. Camera clock corrections go in scripts/camera-clocks.json.
+// changes photos already there. Exact copies of photos already on the site are skipped.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import exifr from 'exifr';
 import sharp from 'sharp';
-import { EXIF_PICK, HOUR, fromMs, toMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode, dhash, looksDuplicate, HASH_W, HASH_H } from '../js/locate.js';
+import { EXIF_PICK, toMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode } from '../js/locate.js';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const INBOX = path.join(ROOT, 'photos');
 const MANIFEST = path.join(ROOT, 'photos.json');
-const CLOCKS = path.join(ROOT, 'scripts', 'camera-clocks.json');
 const GEOCACHE = path.join(ROOT, 'scripts', '.geocache.json');
 const EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.avif', '.heic', '.heif']);
 const OFFLINE = process.argv.includes('--offline');
@@ -40,7 +39,6 @@ async function main() {
   await fs.mkdir(path.join(ROOT, 'images/large'), { recursive: true });
   const existing = await readJson(MANIFEST, []);
   const have = new Set(existing.map((p) => p.id));
-  const clocks = await readJson(CLOCKS, {});
   const geocache = await readJson(GEOCACHE, {});
   const files = (await walk(INBOX).catch(() => [])).sort();
   const added = [], skipped = [], failed = [];
@@ -58,10 +56,8 @@ async function main() {
       let exif = {};
       try { exif = { ...(await exifr.parse(buf, { reviveValues: false, pick: EXIF_PICK })), ...(await exifr.gps(buf)) }; } catch {}
       const meta = normaliseExif(exif);
-      const gray = await sharp(buf).rotate().resize(HASH_W, HASH_H, { fit: 'fill' }).grayscale().raw().toBuffer();
-      const phash = dhash(gray);
       const folder = path.relative(INBOX, path.dirname(file)).split(path.sep)[0] || null;
-      added.push({ id, src: path.basename(file), thumb, large, w: t.width, h: t.height, ...meta, phash, place: null, country: null, caption: null, folder });
+      added.push({ id, src: path.basename(file), thumb, large, w: t.width, h: t.height, ...meta, place: null, country: null, caption: null, folder });
       have.add(id);
     } catch (e) {
       failed.push(`${file}: ${e.message}`);
@@ -69,26 +65,8 @@ async function main() {
   }
   console.log();
 
-  // camera clocks
   const cams = new Map();
-  for (const p of added) {
-    const c = cams.get(p.camera) || { n: 0, gps: 0 }; c.n++; if (p.lat != null) c.gps++; cams.set(p.camera, c);
-    if (!(p.camera in clocks)) clocks[p.camera] = 0;
-    const fix = +clocks[p.camera] || 0;
-    if (fix && p.date) p.date = fromMs(toMs(p.date) + fix * HOUR);
-  }
-
-  // skip look-alikes of photos already on the site or earlier in this batch
-  const lookalikes = [];
-  for (let i = added.length - 1; i >= 0; i--) {
-    const p = added[i];
-    const twin = [...existing, ...added.slice(0, i)].find((q) => looksDuplicate(p, q));
-    if (twin) {
-      lookalikes.push(`${p.src} (looks like ${twin.src})`);
-      await fs.rm(path.join(ROOT, p.thumb), { force: true }); await fs.rm(path.join(ROOT, p.large), { force: true });
-      added.splice(i, 1);
-    }
-  }
+  for (const p of added) { const c = cams.get(p.camera) || { n: 0, gps: 0 }; c.n++; if (p.lat != null) c.gps++; cams.set(p.camera, c); }
 
   // place names for photos with GPS: reuse a nearby existing name, else look it up
   const all = [...existing, ...added];
@@ -107,14 +85,12 @@ async function main() {
 
   const out = [...existing, ...added].sort((a, b) => (toMs(a.date) || 0) - (toMs(b.date) || 0));
   await fs.writeFile(MANIFEST, JSON.stringify(out, null, 1));
-  await fs.writeFile(CLOCKS, JSON.stringify(clocks, null, 2));
   await fs.writeFile(GEOCACHE, JSON.stringify(geocache));
 
-  console.log(`\nAdded ${added.length} photos (${skipped.length} already on the site${lookalikes.length ? `, ${lookalikes.length} look-alike duplicates skipped` : ''}${failed.length ? `, ${failed.length} failed` : ''}).`);
-  for (const l of lookalikes.slice(0, 20)) console.log(`  = ${l}`);
+  console.log(`\nAdded ${added.length} photos (${skipped.length} already on the site${failed.length ? `, ${failed.length} failed` : ''}).`);
   if (cams.size) {
     console.log('\nCameras:');
-    for (const [name, c] of cams) console.log(`  ${name.padEnd(30)} ${String(c.n).padStart(5)} photos, ${c.gps} with GPS${clocks[name] ? `, clock fixed by ${clocks[name]}h` : ''}`);
+    for (const [name, c] of cams) console.log(`  ${name.padEnd(30)} ${String(c.n).padStart(5)} photos, ${c.gps} with GPS`);
   }
   const noGps = added.filter((p) => p.approx).length + inf.unmatched.length;
   if (noGps) {
