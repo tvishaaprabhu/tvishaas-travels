@@ -55,6 +55,18 @@
     </label>
 
     <div id="cams" class="cams" hidden></div>
+
+    <form id="batch-place" class="batch-place" hidden>
+      <div>
+        <h3><span id="bp-count"></span> Where were they taken?</h3>
+        <p>Applies to every photo in this batch without a location. They'll go on the map there.</p>
+      </div>
+      <div class="bp-row">
+        <input id="bp-place" type="text" placeholder="City or place (optional)">
+        <input id="bp-country" type="text" placeholder="Country">
+        <button class="btn" type="submit">Apply</button>
+      </div>
+    </form>
     <div id="add-list" class="cards"></div>
 
     <div class="dock" id="add-dock" hidden>

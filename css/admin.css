@@ -124,3 +124,11 @@ details a { color: var(--rose-dk); }
   .dock { border-radius: 22px; flex-direction: column; align-items: stretch; padding: 14px; }
   .dock-r .btn { flex: 1; }
 }
+
+/* one place for every photo without a location */
+.batch-place { margin: 22px 0 0; padding: 18px 20px; border-radius: 18px; background: var(--rose-lt); color: var(--rose-dk); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
+.batch-place h3 { margin: 0 0 2px; font: italic 600 20px var(--serif); color: var(--ink); }
+.batch-place p { margin: 0; font-size: 14px; }
+.bp-row { display: flex; gap: 8px; flex: 1 1 420px; max-width: 560px; }
+.bp-row input { flex: 1; min-width: 0; }
+@media (max-width: 700px) { .bp-row { flex-wrap: wrap; } .bp-row .btn { width: 100%; } }

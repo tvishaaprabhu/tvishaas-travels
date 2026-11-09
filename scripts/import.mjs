@@ -21,7 +21,7 @@ const CLOCKS = path.join(ROOT, 'scripts', 'camera-clocks.json');
 const GEOCACHE = path.join(ROOT, 'scripts', '.geocache.json');
 const EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.avif', '.heic', '.heif']);
 const OFFLINE = process.argv.includes('--offline');
-const THUMB_W = 1100, LARGE_W = 2400;
+const THUMB_W = 1100, LARGE_W = 2000;
 
 async function walk(dir) {
   const out = [];

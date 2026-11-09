@@ -15,7 +15,10 @@ Go to **`/admin.html`** on the site (it isn't linked from anywhere).
    The key is saved on that device only. Press **Lock** to remove it.
 2. **Add photos**: drop or pick photos. The page reads date + GPS, names the place,
    matches camera photos without GPS to phone photos by time, and lets you fix names or add captions.
-   Press **Publish**. The site updates about a minute later.
+   If some photos have no location (e.g. a digital camera), a pink box asks where they were taken:
+   type the country (and optionally a city) once and it applies to all of them.
+   Press **Publish**. Big batches go up 30 at a time; if it stops halfway, press Publish again to continue.
+   The site updates about a minute later.
 3. **Manage**: search, edit place/country/caption, or delete photos, then **Save changes**.
 
 Only someone with a key for this repo can publish; everyone else just sees a login box.
@@ -48,6 +51,10 @@ npm run import
 git add -A && git commit -m "Add photos" && git push
 ```
 Camera clock corrections for bulk imports go in `scripts/camera-clocks.json` (hours, e.g. `"Canon PowerShot SX620 HS": -5`).
+
+## Space
+GitHub Pages sites can be up to about 1 GB. Each photo takes roughly 0.6 MB (a thumbnail + a 2000px copy),
+so there's room for about 1,500 photos. Manage → Find duplicates helps keep it tidy.
 
 ## Files
 - `photos.json`: the list of photos (source of truth; the admin page edits it).

@@ -14,7 +14,7 @@ const REPO = (() => {
   return FALLBACK;
 })();
 const API = 'https://api.github.com';
-const THUMB_W = 1100, LARGE_W = 2400;
+const THUMB_W = 1100, LARGE_W = 2000;
 const TOKEN_KEY = 'travels-admin-token';
 const GEO_KEY = 'travels-geocache';
 
@@ -168,17 +168,8 @@ async function sha1(buf) {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
 }
 
-// Visual fingerprint (see dhash in locate.js). `src` is a File or an image URL.
-async function fingerprint(src) {
-  let pic;
-  let aspect;
-  if (typeof src === 'string') { pic = new Image(); pic.src = src; await pic.decode(); aspect = pic.naturalWidth / pic.naturalHeight; }
-  else {
-    const full = await createImageBitmap(src, { imageOrientation: 'from-image' });
-    aspect = full.width / full.height;
-    try { pic = await createImageBitmap(src, { imageOrientation: 'from-image', resizeWidth: HASH_W * 4, resizeHeight: HASH_H * 4, resizeQuality: 'high' }); full.close?.(); }
-    catch { pic = full; }
-  }
+// Visual fingerprint (see dhash in locate.js) from anything drawable
+function hashOf(pic) {
   const c = document.createElement('canvas');
   c.width = HASH_W; c.height = HASH_H;
   const g = c.getContext('2d', { willReadFrequently: true });
@@ -187,7 +178,27 @@ async function fingerprint(src) {
   const d = g.getImageData(0, 0, HASH_W, HASH_H).data;
   const gray = new Array(HASH_W * HASH_H);
   for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
-  return { phash: dhash(gray), aspect };
+  return dhash(gray);
+}
+async function fingerprintUrl(url) {
+  const pic = new Image(); pic.src = url; await pic.decode();
+  return hashOf(pic);
+}
+// Decode a photo once: small preview for the card (keeps memory low with big batches) + fingerprint
+async function analyse(file) {
+  const full = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const aspect = full.width / full.height;
+  const PW = Math.min(480, full.width), PH = Math.max(1, Math.round(PW / aspect));
+  let small = full;
+  try { small = await createImageBitmap(file, { imageOrientation: 'from-image', resizeWidth: PW, resizeHeight: PH, resizeQuality: 'high' }); } catch {}
+  const c = document.createElement('canvas');
+  c.width = PW; c.height = PH;
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+  g.drawImage(small, 0, 0, PW, PH);
+  if (small !== full) small.close?.();
+  full.close?.();
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
+  return { phash: hashOf(c), aspect, preview: URL.createObjectURL(blob) };
 }
 const skip = (i) => i.dupe || i.lookalike; // exact copy, or looks like one
 
@@ -225,18 +236,18 @@ drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); addFil
 
 async function addFiles(files) {
   if (!files.length) return;
-  toast(`Reading ${files.length} photo${files.length > 1 ? 's' : ''}…`, false, 0);
   const known = new Set([...manifest.map((p) => p.id), ...items.map((i) => i.id)]);
-  for (const file of files) {
+  for (const [n, file] of files.entries()) {
+    toast(`Reading photo ${n + 1} of ${files.length}…`, false, 0);
     const buf = await file.arrayBuffer();
     const id = await sha1(buf);
     let exif = {};
     try { exif = { ...(await exifr.parse(buf, { reviveValues: false, pick: EXIF_PICK })), ...(await exifr.gps(buf)) }; } catch {}
     const meta = normaliseExif(exif);
     let fp = {};
-    try { fp = await fingerprint(file); } catch {}
+    try { fp = await analyse(file); } catch {}
     items.push({
-      file, id, raw: meta, camera: meta.camera, phash: fp.phash || null, aspect: fp.aspect, preview: URL.createObjectURL(file),
+      file, id, raw: meta, camera: meta.camera, phash: fp.phash || null, aspect: fp.aspect, preview: fp.preview || URL.createObjectURL(file),
       dupe: known.has(id), place: '', country: '', caption: '', edited: {},
     });
     known.add(id);
@@ -334,6 +345,9 @@ function renderAdd() {
     list.append(card);
   }
   renderCams();
+  const noLoc = items.filter((i) => !skip(i) && i.lat == null && !i.place);
+  $('#batch-place').hidden = !noLoc.length;
+  $('#bp-count').textContent = `${noLoc.length} photo${noLoc.length === 1 ? ' has' : 's have'} no location.`;
   const n = items.filter((i) => !skip(i)).length;
   const unplaced = items.filter((i) => !skip(i) && i.lat == null && !i.place).length;
   const dupes = items.filter(skip).length;
@@ -374,62 +388,93 @@ function renderCams() {
   }
 }
 
+$('#batch-place').onsubmit = (e) => {
+  e.preventDefault();
+  const place = $('#bp-place').value.trim(), country = $('#bp-country').value.trim();
+  if (!place && !country) return;
+  let n = 0;
+  for (const it of items) {
+    if (skip(it) || it.lat != null) continue;
+    it.place = place || country; it.country = country;
+    it.edited.place = it.edited.country = true;
+    n++;
+  }
+  renderAdd();
+  toast(`✿ Set ${n} photo${n === 1 ? '' : 's'} to ${[place, country].filter(Boolean).join(', ')}. They'll go on the map there.`, false, 5000);
+};
+
 $('#add-clear').onclick = () => { items.forEach((i) => URL.revokeObjectURL(i.preview)); items = []; renderAdd(); };
+
+const CHUNK = 30; // photos per commit: keeps memory low and lets a big upload resume if it stops halfway
 
 $('#publish').onclick = async () => {
   const todo = items.filter((i) => !skip(i));
   if (!todo.length) return;
   const btn = $('#publish');
   btn.disabled = true;
+  let added = 0, already = 0;
   try {
-    // photos typed in by name only: look up coordinates so they appear on the map
+    // photos with only a typed-in place: look up coordinates (once per name) so they appear on the map
+    const coords = new Map();
     for (const it of todo) {
-      if (it.lat == null && it.place) {
-        toast(`Finding “${it.place}” on the map…`, false, 0);
-        try { const g = await forwardGeocode([it.place, it.country].filter(Boolean).join(', ')); if (g) Object.assign(it, g, { approx: true }); } catch {}
+      if (it.lat != null || !(it.place || it.country)) continue;
+      const q = [it.place, it.country].filter(Boolean).join(', ');
+      if (!coords.has(q)) {
+        toast(`Finding “${q}” on the map…`, false, 0);
+        try { coords.set(q, await forwardGeocode(q)); } catch { coords.set(q, null); }
       }
+      if (coords.get(q)) Object.assign(it, coords.get(q), { approx: true });
     }
-    const files = [], entries = [];
-    for (const [n, it] of todo.entries()) {
-      toast(`Preparing ${n + 1} of ${todo.length}…`, false, 0);
-      let t, l;
-      try {
-        t = await resize(it.file, THUMB_W, THUMB_W * 3, 0.82);
-        l = await resize(it.file, LARGE_W, LARGE_W, 0.85);
-      } catch {
-        it.error = /hei[cf]/i.test(it.file.name) ? 'HEIC: open this page in Safari, or export as JPEG' : "Couldn't read this image";
-        continue;
-      }
-      const thumb = `images/thumbs/${it.id}.jpg`, large = `images/large/${it.id}.jpg`;
-      files.push({ path: thumb, b64: bytesToB64(new Uint8Array(await t.blob.arrayBuffer())) });
-      files.push({ path: large, b64: bytesToB64(new Uint8Array(await l.blob.arrayBuffer())) });
-      const clean = (v) => (v == null ? '' : String(v)).trim() || null;
-      entries.push({
-        id: it.id, src: it.file.name, thumb, large, w: t.w, h: t.h, date: it.date,
-        lat: it.lat, lng: it.lng, place: clean(it.place), country: clean(it.country),
-        caption: clean(it.caption), camera: it.camera, phash: it.phash, ...(it.approx ? { approx: true } : {}),
-      });
-    }
-    if (!entries.length) throw new Error('No photos could be prepared.');
     const kept = new Set(todo.filter((i) => i.keep).map((i) => i.id));
-    let added = 0;
-    await commit(`Add ${entries.length} photo${entries.length === 1 ? '' : 's'}`, (cur) => {
-      const ids = new Set(cur.map((p) => p.id));
-      // last check in case the same photos were just published from another device
-      const fresh = entries.filter((e) => !ids.has(e.id) && (kept.has(e.id) || !cur.some((p) => looksDuplicate(e, p))));
-      added = fresh.length;
-      const next = [...cur, ...fresh].sort((a, b) => (toMs(a.date) || 0) - (toMs(b.date) || 0));
-      return { manifest: next, files: files.filter((f) => fresh.some((e) => f.path.includes(e.id))) };
-    }, (msg) => toast(msg, false, 0));
-    const done = new Set(entries.map((e) => e.id));
-    items.filter((i) => done.has(i.id) || skip(i)).forEach((i) => URL.revokeObjectURL(i.preview));
-    items = items.filter((i) => !done.has(i.id) && !skip(i)); // keep only ones that failed
+    const clean = (v) => (v == null ? '' : String(v)).trim() || null;
+
+    for (let start = 0; start < todo.length; start += CHUNK) {
+      const chunk = todo.slice(start, start + CHUNK);
+      const files = [], entries = [];
+      for (const [n, it] of chunk.entries()) {
+        toast(`Preparing photo ${start + n + 1} of ${todo.length}…`, false, 0);
+        let t, l;
+        try {
+          t = await resize(it.file, THUMB_W, THUMB_W * 3, 0.82);
+          l = await resize(it.file, LARGE_W, LARGE_W, 0.85);
+        } catch {
+          it.error = /hei[cf]/i.test(it.file.name) ? 'HEIC: open this page in Safari, or export as JPEG' : "Couldn't read this image";
+          continue;
+        }
+        const thumb = `images/thumbs/${it.id}.jpg`, large = `images/large/${it.id}.jpg`;
+        files.push({ path: thumb, b64: bytesToB64(new Uint8Array(await t.blob.arrayBuffer())) });
+        files.push({ path: large, b64: bytesToB64(new Uint8Array(await l.blob.arrayBuffer())) });
+        entries.push({
+          id: it.id, src: it.file.name, thumb, large, w: t.w, h: t.h, date: it.date,
+          lat: it.lat, lng: it.lng, place: clean(it.place), country: clean(it.country),
+          caption: clean(it.caption), camera: it.camera, phash: it.phash, ...(it.approx ? { approx: true } : {}),
+        });
+      }
+      if (!entries.length) continue;
+      let fresh = [];
+      const range = todo.length > CHUNK ? ` (${start + 1}–${Math.min(start + CHUNK, todo.length)} of ${todo.length})` : '';
+      await commit(`Add ${entries.length} photo${entries.length === 1 ? '' : 's'}`, (cur) => {
+        const ids = new Set(cur.map((p) => p.id));
+        // last check in case the same photos were just published from another device
+        fresh = entries.filter((e) => !ids.has(e.id) && (kept.has(e.id) || !cur.some((p) => looksDuplicate(e, p))));
+        const next = [...cur, ...fresh].sort((a, b) => (toMs(a.date) || 0) - (toMs(b.date) || 0));
+        return { manifest: next, files: files.filter((f) => fresh.some((e) => f.path.includes(e.id))) };
+      }, (msg) => toast(msg + range, false, 0));
+      added += fresh.length; already += entries.length - fresh.length;
+      // published: take them off the list, so pressing Publish again only does what's left
+      const done = new Set(entries.map((e) => e.id));
+      items.filter((i) => done.has(i.id)).forEach((i) => URL.revokeObjectURL(i.preview));
+      items = items.filter((i) => !done.has(i.id));
+      renderAdd();
+    }
+    items.filter(skip).forEach((i) => URL.revokeObjectURL(i.preview));
+    items = items.filter((i) => !skip(i)); // anything left failed to read
     renderAdd();
     const a = el('a', null, 'View site'); a.href = './'; a.target = '_blank';
-    const extra = entries.length - added;
-    toast([`✿ Published ${added} photo${added === 1 ? '' : 's'}${extra ? ` (${extra} were already on the site)` : ''}! The site updates in about a minute. `, a], false, 9000);
+    const failed = items.length;
+    toast([`✿ Published ${added} photo${added === 1 ? '' : 's'}${already ? ` (${already} were already on the site)` : ''}${failed ? `. ${failed} couldn't be read` : ''}! The site updates in about a minute. `, a], !!failed && !added, 10000);
   } catch (e) {
-    toast(`Couldn't publish: ${e.message}`, true, 9000);
+    toast(`Stopped: ${e.message}. ${added ? `${added} photos were published. ` : ''}Press Publish again to continue with the rest.`, true, 0);
   } finally {
     btn.disabled = false;
   }
@@ -514,7 +559,7 @@ $('#find-dupes').onclick = async () => {
     const missing = manifest.filter((p) => !p.phash);
     for (const [n, p] of missing.entries()) {
       toast(`Checking photos… ${n + 1}/${missing.length}`, false, 0);
-      try { p.phash = (await fingerprint(p.thumb)).phash; } catch {}
+      try { p.phash = await fingerprintUrl(p.thumb); } catch {}
     }
     const groups = duplicateGroups(manifest);
     if (!groups.length) { toast('✿ No duplicates found.', false, 5000); return; }
