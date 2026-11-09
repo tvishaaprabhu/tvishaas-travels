@@ -87,6 +87,10 @@ details a { color: var(--rose-dk); }
 
 .m-bar { display: flex; align-items: center; gap: 14px; }
 .m-bar input { max-width: 460px; }
+.m-bar #find-dupes { margin-left: auto; white-space: nowrap; }
+.pc.deleted .btn { justify-self: start; }
+.pc-note { margin: 0; font-size: 13px; color: var(--ink); }
+.pc.deleted:has(.pc-note) { opacity: .8; }
 
 .dock {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60;

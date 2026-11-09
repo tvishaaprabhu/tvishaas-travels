@@ -1,5 +1,5 @@
 import exifr from '../vendor/exifr/exifr.mjs';
-import { EXIF_PICK, HOUR, toMs, fromMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode, forwardGeocode } from './locate.js';
+import { EXIF_PICK, HOUR, toMs, fromMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode, forwardGeocode, dhash, looksDuplicate, duplicateGroups, HASH_W, HASH_H } from './locate.js';
 
 // ---------- config ----------
 // On GitHub Pages (https://<owner>.github.io/<repo>/) the repo is detected automatically.
@@ -168,6 +168,29 @@ async function sha1(buf) {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
 }
 
+// Visual fingerprint (see dhash in locate.js). `src` is a File or an image URL.
+async function fingerprint(src) {
+  let pic;
+  let aspect;
+  if (typeof src === 'string') { pic = new Image(); pic.src = src; await pic.decode(); aspect = pic.naturalWidth / pic.naturalHeight; }
+  else {
+    const full = await createImageBitmap(src, { imageOrientation: 'from-image' });
+    aspect = full.width / full.height;
+    try { pic = await createImageBitmap(src, { imageOrientation: 'from-image', resizeWidth: HASH_W * 4, resizeHeight: HASH_H * 4, resizeQuality: 'high' }); full.close?.(); }
+    catch { pic = full; }
+  }
+  const c = document.createElement('canvas');
+  c.width = HASH_W; c.height = HASH_H;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(pic, 0, 0, HASH_W, HASH_H);
+  const d = g.getImageData(0, 0, HASH_W, HASH_H).data;
+  const gray = new Array(HASH_W * HASH_H);
+  for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+  return { phash: dhash(gray), aspect };
+}
+const skip = (i) => i.dupe || i.lookalike; // exact copy, or looks like one
+
 // Resize with good quality (halving steps), returns { blob, w, h }. Output has no metadata.
 async function resize(file, maxW, maxH, quality) {
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -210,8 +233,10 @@ async function addFiles(files) {
     let exif = {};
     try { exif = { ...(await exifr.parse(buf, { reviveValues: false, pick: EXIF_PICK })), ...(await exifr.gps(buf)) }; } catch {}
     const meta = normaliseExif(exif);
+    let fp = {};
+    try { fp = await fingerprint(file); } catch {}
     items.push({
-      file, id, raw: meta, camera: meta.camera, preview: URL.createObjectURL(file),
+      file, id, raw: meta, camera: meta.camera, phash: fp.phash || null, aspect: fp.aspect, preview: URL.createObjectURL(file),
       dupe: known.has(id), place: '', country: '', caption: '', edited: {},
     });
     known.add(id);
@@ -229,7 +254,14 @@ async function locateAll() {
     if (!it.edited.place) it.place = '';
     if (!it.edited.country) it.country = '';
   }
-  const live = items.filter((i) => !i.dupe);
+  // look-alikes of photos already on the site, or earlier in this batch
+  for (const [k, it] of items.entries()) {
+    it.lookalike = false;
+    if (it.dupe || it.keep) continue;
+    const twin = manifest.find((p) => looksDuplicate(it, p)) || items.slice(0, k).find((q) => !skip(q) && looksDuplicate(it, q));
+    if (twin) { it.lookalike = true; it.twin = twin.place ? `a photo from ${twin.place}` : twin.file ? twin.file.name : 'a photo on the site'; }
+  }
+  const live = items.filter((i) => !skip(i));
   // names for photos with GPS: reuse a nearby name first, then look up online
   for (const it of live) {
     if (it.lat == null || it.place) continue;
@@ -261,6 +293,7 @@ async function locateAll() {
 
 function badgeFor(it) {
   if (it.dupe) return ['dupe', 'Already on the site'];
+  if (it.lookalike) return ['dupe', 'Looks like a duplicate'];
   if (it.error) return ['err', it.error];
   if (it.lat != null && !it.approx) return ['gps', 'GPS'];
   if (it.approx) return ['approx', 'Matched by time'];
@@ -282,7 +315,15 @@ function renderAdd() {
     badges.append(el('span', `badge ${cls}`, txt));
     img.append(x, badges);
     card.append(img);
-    if (!it.dupe) {
+    if (it.lookalike) {
+      card.classList.add('deleted');
+      const body = el('div', 'pc-body');
+      body.append(el('p', 'pc-note', `Looks the same as ${it.twin} and was taken at the same moment, so it won't be published.`));
+      const keep = el('button', 'btn ghost', 'Keep anyway');
+      keep.onclick = () => { it.keep = true; locateAll(); };
+      body.append(keep);
+      card.append(body);
+    } else if (!it.dupe) {
       const body = el('div', 'pc-body');
       body.append(el('div', 'pc-date', `${fmtDate(it.date)} · ${it.camera}`));
       const row = el('div', 'pc-row');
@@ -293,10 +334,11 @@ function renderAdd() {
     list.append(card);
   }
   renderCams();
-  const n = items.filter((i) => !i.dupe).length;
-  const unplaced = items.filter((i) => !i.dupe && i.lat == null && !i.place).length;
+  const n = items.filter((i) => !skip(i)).length;
+  const unplaced = items.filter((i) => !skip(i) && i.lat == null && !i.place).length;
+  const dupes = items.filter(skip).length;
   $('#add-dock').hidden = !items.length;
-  $('#add-summary').textContent = `${n} new photo${n === 1 ? '' : 's'}` + (unplaced ? ` · ${unplaced} without a place (still fine)` : '');
+  $('#add-summary').textContent = `${n} new photo${n === 1 ? '' : 's'}` + (dupes ? ` · ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : '') + (unplaced ? ` · ${unplaced} without a place (still fine)` : '');
   $('#publish').disabled = !n;
   $('#publish').textContent = n ? `Publish ${n}` : 'Publish';
 }
@@ -312,7 +354,7 @@ function input(obj, key, ph, onChange) {
 }
 
 function renderCams() {
-  const live = items.filter((i) => !i.dupe);
+  const live = items.filter((i) => !skip(i));
   const cams = [...new Set(live.filter((i) => i.raw.lat == null && i.raw.date).map((i) => i.camera))];
   const box = $('#cams');
   box.hidden = !cams.length;
@@ -335,7 +377,7 @@ function renderCams() {
 $('#add-clear').onclick = () => { items.forEach((i) => URL.revokeObjectURL(i.preview)); items = []; renderAdd(); };
 
 $('#publish').onclick = async () => {
-  const todo = items.filter((i) => !i.dupe);
+  const todo = items.filter((i) => !skip(i));
   if (!todo.length) return;
   const btn = $('#publish');
   btn.disabled = true;
@@ -350,34 +392,42 @@ $('#publish').onclick = async () => {
     const files = [], entries = [];
     for (const [n, it] of todo.entries()) {
       toast(`Preparing ${n + 1} of ${todo.length}…`, false, 0);
+      let t, l;
       try {
-        const t = await resize(it.file, THUMB_W, THUMB_W * 3, 0.82);
-        const l = await resize(it.file, LARGE_W, LARGE_W, 0.85);
-        const thumb = `images/thumbs/${it.id}.jpg`, large = `images/large/${it.id}.jpg`;
-        files.push({ path: thumb, b64: bytesToB64(new Uint8Array(await t.blob.arrayBuffer())) });
-        files.push({ path: large, b64: bytesToB64(new Uint8Array(await l.blob.arrayBuffer())) });
-        entries.push({
-          id: it.id, src: it.file.name, thumb, large, w: t.w, h: t.h, date: it.date,
-          lat: it.lat, lng: it.lng, place: it.place.trim() || null, country: it.country.trim() || null,
-          caption: it.caption.trim() || null, camera: it.camera, ...(it.approx ? { approx: true } : {}),
-        });
+        t = await resize(it.file, THUMB_W, THUMB_W * 3, 0.82);
+        l = await resize(it.file, LARGE_W, LARGE_W, 0.85);
       } catch {
         it.error = /hei[cf]/i.test(it.file.name) ? 'HEIC: open this page in Safari, or export as JPEG' : "Couldn't read this image";
+        continue;
       }
+      const thumb = `images/thumbs/${it.id}.jpg`, large = `images/large/${it.id}.jpg`;
+      files.push({ path: thumb, b64: bytesToB64(new Uint8Array(await t.blob.arrayBuffer())) });
+      files.push({ path: large, b64: bytesToB64(new Uint8Array(await l.blob.arrayBuffer())) });
+      const clean = (v) => (v == null ? '' : String(v)).trim() || null;
+      entries.push({
+        id: it.id, src: it.file.name, thumb, large, w: t.w, h: t.h, date: it.date,
+        lat: it.lat, lng: it.lng, place: clean(it.place), country: clean(it.country),
+        caption: clean(it.caption), camera: it.camera, phash: it.phash, ...(it.approx ? { approx: true } : {}),
+      });
     }
     if (!entries.length) throw new Error('No photos could be prepared.');
+    const kept = new Set(todo.filter((i) => i.keep).map((i) => i.id));
+    let added = 0;
     await commit(`Add ${entries.length} photo${entries.length === 1 ? '' : 's'}`, (cur) => {
       const ids = new Set(cur.map((p) => p.id));
-      const fresh = entries.filter((e) => !ids.has(e.id));
+      // last check in case the same photos were just published from another device
+      const fresh = entries.filter((e) => !ids.has(e.id) && (kept.has(e.id) || !cur.some((p) => looksDuplicate(e, p))));
+      added = fresh.length;
       const next = [...cur, ...fresh].sort((a, b) => (toMs(a.date) || 0) - (toMs(b.date) || 0));
       return { manifest: next, files: files.filter((f) => fresh.some((e) => f.path.includes(e.id))) };
     }, (msg) => toast(msg, false, 0));
     const done = new Set(entries.map((e) => e.id));
-    items.filter((i) => done.has(i.id) || i.dupe).forEach((i) => URL.revokeObjectURL(i.preview));
-    items = items.filter((i) => !done.has(i.id) && !i.dupe); // keep only ones that failed
+    items.filter((i) => done.has(i.id) || skip(i)).forEach((i) => URL.revokeObjectURL(i.preview));
+    items = items.filter((i) => !done.has(i.id) && !skip(i)); // keep only ones that failed
     renderAdd();
     const a = el('a', null, 'View site'); a.href = './'; a.target = '_blank';
-    toast([`✿ Published ${entries.length} photo${entries.length === 1 ? '' : 's'}! The site updates in about a minute. `, a], false, 9000);
+    const extra = entries.length - added;
+    toast([`✿ Published ${added} photo${added === 1 ? '' : 's'}${extra ? ` (${extra} were already on the site)` : ''}! The site updates in about a minute. `, a], false, 9000);
   } catch (e) {
     toast(`Couldn't publish: ${e.message}`, true, 9000);
   } finally {
@@ -388,11 +438,15 @@ $('#publish').onclick = async () => {
 // ---------- manage ----------
 let changes = new Map(); // id -> { place, country, caption, deleted }
 
+let dupView = null; // ids to show while reviewing duplicates, in group order
+
 function renderManage() {
   const q = $('#search').value.trim().toLowerCase();
   const list = $('#m-list');
   list.innerHTML = '';
-  const shown = manifest.slice().reverse().filter((p) =>
+  $('#find-dupes').textContent = dupView ? 'Show all photos' : 'Find duplicates';
+  const byId = new Map(manifest.map((p) => [p.id, p]));
+  const shown = (dupView ? dupView.map((id) => byId.get(id)).filter(Boolean) : manifest.slice().reverse()).filter((p) =>
     !q || [p.place, p.country, p.caption, p.date, fmtDate(p.date)].some((v) => v && String(v).toLowerCase().includes(q)));
   $('#m-count').textContent = `${shown.length} of ${manifest.length} photos`;
   for (const p of shown.slice(0, 300)) list.append(manageCard(p));
@@ -451,7 +505,27 @@ function updateManageDock() {
 }
 
 $('#search').oninput = () => renderManage();
-$('#m-undo').onclick = () => { changes = new Map(); renderManage(); };
+$('#find-dupes').onclick = async () => {
+  if (dupView) { dupView = null; renderManage(); return; }
+  const btn = $('#find-dupes');
+  btn.disabled = true;
+  try {
+    // older photos may not have a fingerprint yet: work it out from their thumbnail
+    const missing = manifest.filter((p) => !p.phash);
+    for (const [n, p] of missing.entries()) {
+      toast(`Checking photos… ${n + 1}/${missing.length}`, false, 0);
+      try { p.phash = (await fingerprint(p.thumb)).phash; } catch {}
+    }
+    const groups = duplicateGroups(manifest);
+    if (!groups.length) { toast('✿ No duplicates found.', false, 5000); return; }
+    for (const g of groups) for (const p of g.slice(1)) { const c = changes.get(p.id) || {}; c.deleted = true; changes.set(p.id, c); }
+    dupView = groups.flat().map((p) => p.id);
+    const extra = dupView.length - groups.length;
+    toast(`Found ${groups.length} set${groups.length === 1 ? '' : 's'} of duplicates. ${extra} extra cop${extra === 1 ? 'y is' : 'ies are'} marked for deletion: check, then Save changes.`, false, 9000);
+    renderManage();
+  } finally { btn.disabled = false; }
+};
+$('#m-undo').onclick = () => { changes = new Map(); dupView = null; renderManage(); };
 $('#m-save').onclick = async () => {
   const pend = new Map(pendingChanges());
   if (!pend.size) return;
@@ -479,13 +553,14 @@ $('#m-save').onclick = async () => {
         if (!c) { next.push(p); continue; }
         if (c.deleted) { deletes.push(p.thumb, p.large); continue; }
         const q = { ...p };
-        for (const k of ['place', 'country', 'caption']) if (k in c) q[k] = c[k].trim() || null;
+        for (const k of ['place', 'country', 'caption']) if (k in c) q[k] = String(c[k] ?? '').trim() || null;
         if (coords.has(p.id)) Object.assign(q, coords.get(p.id), { approx: true });
         next.push(q);
       }
       return { manifest: next, deletes };
     }, (m) => toast(m, false, 0));
     changes = new Map();
+    dupView = null;
     renderManage();
     toast('✿ Saved! The site updates in about a minute.', false, 7000);
   } catch (e) {

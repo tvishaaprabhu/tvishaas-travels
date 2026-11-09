@@ -98,3 +98,55 @@ export async function forwardGeocode(query, headers = {}) {
   const j = await nominatim(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en&q=${encodeURIComponent(query)}`, headers);
   return j[0] ? { lat: +(+j[0].lat).toFixed(5), lng: +(+j[0].lon).toFixed(5) } : null;
 }
+
+// ---------- duplicate detection ----------
+// A "difference hash": a 64-bit fingerprint of what the photo looks like. It survives resizing,
+// re-compression and small edits. Input: 72x64 grayscale pixels (array of 0-255), row by row.
+export const HASH_W = 72, HASH_H = 64;
+export function dhash(gray) {
+  const cols = 9, rows = 8, bw = HASH_W / cols, bh = HASH_H / rows;
+  const cell = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    let sum = 0;
+    for (let y = r * bh; y < (r + 1) * bh; y++) for (let x = c * bw; x < (c + 1) * bw; x++) sum += gray[y * HASH_W + x];
+    cell.push(sum / (bw * bh));
+  }
+  let hex = '';
+  for (let r = 0; r < rows; r++) {
+    let byte = 0;
+    for (let c = 0; c < 8; c++) byte = (byte << 1) | (cell[r * cols + c] > cell[r * cols + c + 1] ? 1 : 0);
+    hex += byte.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+export function hamming(a, b) {
+  let d = 0;
+  for (let i = 0; i < a.length; i += 2) {
+    let x = parseInt(a.slice(i, i + 2), 16) ^ parseInt(b.slice(i, i + 2), 16);
+    while (x) { d += x & 1; x >>= 1; }
+  }
+  return d;
+}
+// Same-looking photo taken at the same moment (or with the date missing on one copy)
+const aspectOf = (p) => p.aspect || (p.w && p.h ? p.w / p.h : null);
+export function looksDuplicate(a, b) {
+  if (!a.phash || !b.phash) return false;
+  const ra = aspectOf(a), rb = aspectOf(b);
+  if (ra && rb && Math.abs(ra - rb) / rb > 0.03) return false; // different shape: not a copy
+  const d = hamming(a.phash, b.phash);
+  if (!a.date || !b.date) return d <= 3; // one copy lost its date (e.g. sent via WhatsApp): must look near-identical
+  return d <= 6 && Math.abs(toMs(a.date) - toMs(b.date)) <= 2000;
+}
+// Groups of look-alikes; the first photo in each group is the best one to keep
+export function duplicateGroups(photos) {
+  const score = (p) => (p.lat != null && !p.approx ? 4 : 0) + (p.caption ? 2 : 0) + (p.place ? 1 : 0) + (p.w * p.h) / 1e9;
+  const seen = new Set(), groups = [];
+  for (const p of photos) {
+    if (seen.has(p.id) || !p.phash) continue;
+    const g = photos.filter((q) => q === p || (!seen.has(q.id) && looksDuplicate(p, q)));
+    if (g.length < 2) continue;
+    g.forEach((q) => seen.add(q.id));
+    groups.push(g.sort((a, b) => score(b) - score(a)));
+  }
+  return groups;
+}

@@ -25,6 +25,14 @@ location on the map is public.
 **iPhone tips**: open the admin page in Safari (it can read HEIC photos). If location is missing,
 in the Photos picker tap *Options* → turn on *Location*, or just type the place name.
 
+## Duplicates
+- Uploading the exact same file twice: skipped ("Already on the site").
+- A copy that *looks* the same and was taken at the same moment (re-saved, resized, sent via WhatsApp, exported twice)
+  is marked "Looks like a duplicate" and skipped. Tap **Keep anyway** if it's actually a different shot (e.g. a burst).
+- **Manage → Find duplicates** scans the whole site, keeps the best copy of each (real GPS > caption > place),
+  marks the rest for deletion, and you confirm with **Save changes**.
+- The bulk import skips look-alikes the same way.
+
 ## How locations are worked out
 - Photos with GPS: the city/country is looked up on OpenStreetMap (or reused from a nearby photo).
 - Photos without GPS (e.g. a digital camera) borrow the location of GPS photos taken around the same time:
