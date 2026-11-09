@@ -71,7 +71,7 @@ details a { color: var(--rose-dk); }
 .badge.gps { background: var(--blue); color: var(--blue-dk); }
 .badge.approx { background: var(--mimosa); color: var(--mimosa-dk); }
 .badge.none { background: var(--rose-lt); color: var(--rose-dk); }
-.badge.dupe, .badge.err { background: var(--ink); color: var(--linen); }
+.badge.err { background: var(--ink); color: var(--linen); }
 .pc-body { padding: 14px; display: grid; gap: 8px; }
 .pc-date { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .pc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

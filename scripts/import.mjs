@@ -5,7 +5,8 @@
 //   npm run import -- --offline   -> skip the place-name lookup
 //
 // photos.json is the site's source of truth; this script only ADDS to it and never
-// changes photos already there. Exact copies of photos already on the site are skipped.
+// changes photos already there. Each imported photo is moved to photos/.imported,
+// so running it again only picks up photos you've added since.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -38,16 +39,14 @@ async function main() {
   await fs.mkdir(path.join(ROOT, 'images/thumbs'), { recursive: true });
   await fs.mkdir(path.join(ROOT, 'images/large'), { recursive: true });
   const existing = await readJson(MANIFEST, []);
-  const have = new Set(existing.map((p) => p.id));
   const geocache = await readJson(GEOCACHE, {});
   const files = (await walk(INBOX).catch(() => [])).sort();
-  const added = [], skipped = [], failed = [];
+  const added = [], failed = [];
 
   for (const [i, file] of files.entries()) {
     process.stdout.write(`\r${i + 1}/${files.length} ${path.basename(file).slice(-40).padEnd(40)}`);
     const buf = await fs.readFile(file);
-    const id = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12);
-    if (have.has(id)) { skipped.push(file); continue; }
+    const id = crypto.randomBytes(6).toString('hex');
     try {
       const thumb = `images/thumbs/${id}.webp`, large = `images/large/${id}.jpg`;
       // sharp drops all metadata (incl. GPS) from the web copies
@@ -58,7 +57,7 @@ async function main() {
       const meta = normaliseExif(exif);
       const folder = path.relative(INBOX, path.dirname(file)).split(path.sep)[0] || null;
       added.push({ id, src: path.basename(file), thumb, large, w: t.width, h: t.height, ...meta, place: null, country: null, caption: null, folder });
-      have.add(id);
+      added.at(-1).file = file;
     } catch (e) {
       failed.push(`${file}: ${e.message}`);
     }
@@ -82,12 +81,20 @@ async function main() {
   // photos without GPS: borrow location by time
   const inf = inferLocations(added, all);
   for (const p of added) { p.place ||= p.folder; delete p.folder; }
+  const files_ = added.map((p) => p.file);
+  for (const p of added) delete p.file;
 
   const out = [...existing, ...added].sort((a, b) => (toMs(a.date) || 0) - (toMs(b.date) || 0));
   await fs.writeFile(MANIFEST, JSON.stringify(out, null, 1));
   await fs.writeFile(GEOCACHE, JSON.stringify(geocache));
+  // move imported originals out of the way so a second run doesn't add them again
+  for (const f of files_) {
+    const dest = path.join(INBOX, '.imported', path.relative(INBOX, f));
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.rename(f, dest);
+  }
 
-  console.log(`\nAdded ${added.length} photos (${skipped.length} already on the site${failed.length ? `, ${failed.length} failed` : ''}).`);
+  console.log(`\nAdded ${added.length} photos${failed.length ? ` (${failed.length} failed)` : ''}. Originals moved to photos/.imported`);
   if (cams.size) {
     console.log('\nCameras:');
     for (const [name, c] of cams) console.log(`  ${name.padEnd(30)} ${String(c.n).padStart(5)} photos, ${c.gps} with GPS`);

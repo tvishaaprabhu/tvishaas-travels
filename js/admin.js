@@ -163,10 +163,8 @@ function showTab(name) {
 document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
 
 // ---------- images ----------
-async function sha1(buf) {
-  const h = await crypto.subtle.digest('SHA-1', buf);
-  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
-}
+// Every upload gets its own random id, so even an identical file is published as a separate photo
+const newId = () => [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 // Small preview for the card (keeps memory low with big batches)
 async function analyse(file) {
@@ -184,7 +182,6 @@ async function analyse(file) {
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
   return { preview: URL.createObjectURL(blob) };
 }
-const skip = (i) => i.dupe; // exact copy of a photo already on the site or in this batch
 
 // Resize with good quality (halving steps), returns { blob, w, h }. Output has no metadata.
 async function resize(file, maxW, maxH, quality) {
@@ -219,11 +216,10 @@ drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); addFil
 
 async function addFiles(files) {
   if (!files.length) return;
-  const known = new Set([...manifest.map((p) => p.id), ...items.map((i) => i.id)]);
   for (const [n, file] of files.entries()) {
     toast(`Reading photo ${n + 1} of ${files.length}…`, false, 0);
     const buf = await file.arrayBuffer();
-    const id = await sha1(buf);
+    const id = newId();
     let exif = {};
     try { exif = { ...(await exifr.parse(buf, { reviveValues: false, pick: EXIF_PICK })), ...(await exifr.gps(buf)) }; } catch {}
     const meta = normaliseExif(exif);
@@ -231,9 +227,8 @@ async function addFiles(files) {
     try { fp = await analyse(file); } catch {}
     items.push({
       file, id, raw: meta, camera: meta.camera, preview: fp.preview || URL.createObjectURL(file),
-      dupe: known.has(id), place: '', country: '', caption: '', edited: {},
+      place: '', country: '', caption: '', edited: {},
     });
-    known.add(id);
   }
   $('#toast').hidden = true;
   await locateAll();
@@ -247,7 +242,7 @@ async function locateAll() {
     if (!it.edited.place) it.place = '';
     if (!it.edited.country) it.country = '';
   }
-  const live = items.filter((i) => !skip(i));
+  const live = items;
   // names for photos with GPS: reuse a nearby name first, then look up online
   for (const it of live) {
     if (it.lat == null || it.place) continue;
@@ -278,7 +273,6 @@ async function locateAll() {
 }
 
 function badgeFor(it) {
-  if (it.dupe) return ['dupe', 'Exact copy, skipped'];
   if (it.error) return ['err', it.error];
   if (it.lat != null && !it.approx) return ['gps', 'GPS'];
   if (it.approx) return ['approx', 'Matched by time'];
@@ -300,24 +294,21 @@ function renderAdd() {
     badges.append(el('span', `badge ${cls}`, txt));
     img.append(x, badges);
     card.append(img);
-    if (!it.dupe) {
-      const body = el('div', 'pc-body');
-      body.append(el('div', 'pc-date', `${fmtDate(it.date)} · ${it.camera}`));
-      const row = el('div', 'pc-row');
-      row.append(input(it, 'place', 'Place'), input(it, 'country', 'Country'));
-      body.append(row, input(it, 'caption', 'Caption (optional)'));
-      card.append(body);
-    }
+    const body = el('div', 'pc-body');
+    body.append(el('div', 'pc-date', `${fmtDate(it.date)} · ${it.camera}`));
+    const row = el('div', 'pc-row');
+    row.append(input(it, 'place', 'Place'), input(it, 'country', 'Country'));
+    body.append(row, input(it, 'caption', 'Caption (optional)'));
+    card.append(body);
     list.append(card);
   }
-  const noLoc = items.filter((i) => !skip(i) && i.lat == null && !i.place);
+  const noLoc = items.filter((i) => i.lat == null && !i.place);
   $('#batch-place').hidden = !noLoc.length;
   $('#bp-count').textContent = `${noLoc.length} photo${noLoc.length === 1 ? ' has' : 's have'} no location.`;
-  const n = items.filter((i) => !skip(i)).length;
-  const unplaced = items.filter((i) => !skip(i) && i.lat == null && !i.place).length;
-  const dupes = items.filter(skip).length;
+  const n = items.length;
+  const unplaced = noLoc.length;
   $('#add-dock').hidden = !items.length;
-  $('#add-summary').textContent = `${n} new photo${n === 1 ? '' : 's'}` + (dupes ? ` · ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : '') + (unplaced ? ` · ${unplaced} without a place (still fine)` : '');
+  $('#add-summary').textContent = `${n} new photo${n === 1 ? '' : 's'}` + (unplaced ? ` · ${unplaced} without a place (still fine)` : '');
   $('#publish').disabled = !n;
   $('#publish').textContent = n ? `Publish ${n}` : 'Publish';
 }
@@ -338,7 +329,7 @@ $('#batch-place').onsubmit = (e) => {
   if (!place && !country) return;
   let n = 0;
   for (const it of items) {
-    if (skip(it) || it.lat != null) continue;
+    if (it.lat != null) continue;
     it.place = place || country; it.country = country;
     it.edited.place = it.edited.country = true;
     n++;
@@ -352,11 +343,11 @@ $('#add-clear').onclick = () => { items.forEach((i) => URL.revokeObjectURL(i.pre
 const CHUNK = 30; // photos per commit: keeps memory low and lets a big upload resume if it stops halfway
 
 $('#publish').onclick = async () => {
-  const todo = items.filter((i) => !skip(i));
+  const todo = items.slice();
   if (!todo.length) return;
   const btn = $('#publish');
   btn.disabled = true;
-  let added = 0, already = 0;
+  let added = 0;
   try {
     // photos with only a typed-in place: look up coordinates (once per name) so they appear on the map
     const coords = new Map();
@@ -397,25 +388,23 @@ $('#publish').onclick = async () => {
       let fresh = [];
       const range = todo.length > CHUNK ? ` (${start + 1}–${Math.min(start + CHUNK, todo.length)} of ${todo.length})` : '';
       await commit(`Add ${entries.length} photo${entries.length === 1 ? '' : 's'}`, (cur) => {
+        // if a previous attempt saved this chunk but the reply got lost, don't save it twice
         const ids = new Set(cur.map((p) => p.id));
-        // last check in case the same files were just published from another device
         fresh = entries.filter((e) => !ids.has(e.id));
         const next = [...cur, ...fresh].sort((a, b) => (toMs(a.date) || 0) - (toMs(b.date) || 0));
         return { manifest: next, files: files.filter((f) => fresh.some((e) => f.path.includes(e.id))) };
       }, (msg) => toast(msg + range, false, 0));
-      added += fresh.length; already += entries.length - fresh.length;
+      added += fresh.length;
       // published: take them off the list, so pressing Publish again only does what's left
       const done = new Set(entries.map((e) => e.id));
       items.filter((i) => done.has(i.id)).forEach((i) => URL.revokeObjectURL(i.preview));
       items = items.filter((i) => !done.has(i.id));
       renderAdd();
     }
-    items.filter(skip).forEach((i) => URL.revokeObjectURL(i.preview));
-    items = items.filter((i) => !skip(i)); // anything left failed to read
-    renderAdd();
+    renderAdd(); // anything still listed couldn't be read
     const a = el('a', null, 'View site'); a.href = './'; a.target = '_blank';
     const failed = items.length;
-    toast([`✿ Published ${added} photo${added === 1 ? '' : 's'}${already ? ` (${already} were already on the site)` : ''}${failed ? `. ${failed} couldn't be read` : ''}! The site updates in about a minute. `, a], !!failed && !added, 10000);
+    toast([`✿ Published ${added} photo${added === 1 ? '' : 's'}${failed ? `. ${failed} couldn't be read` : ''}! The site updates in about a minute. `, a], !!failed && !added, 10000);
   } catch (e) {
     toast(`Stopped: ${e.message}. ${added ? `${added} photos were published. ` : ''}Press Publish again to continue with the rest.`, true, 0);
   } finally {

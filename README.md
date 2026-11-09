@@ -28,9 +28,6 @@ location on the map is public.
 **iPhone tips**: open the admin page in Safari (it can read HEIC photos). If location is missing,
 in the Photos picker tap *Options* → turn on *Location*, or just type the place name.
 
-## Duplicates
-Uploading the exact same file again is skipped ("Exact copy, skipped"). Nothing else is treated as a duplicate.
-
 ## How locations are worked out
 - Photos with GPS: the city/country is looked up on OpenStreetMap (or reused from a nearby photo).
 - Photos without GPS (e.g. a digital camera) borrow the location of GPS photos taken around the same time:
@@ -41,7 +38,7 @@ Uploading the exact same file again is skipped ("Exact copy, skipped"). Nothing 
 ```bash
 npm install
 # put photos in ./photos (subfolders fine), then:
-npm run import
+npm run import   # imported originals are moved to photos/.imported
 git add -A && git commit -m "Add photos" && git push
 ```
 
