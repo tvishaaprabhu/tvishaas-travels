@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Admin · Tvishaa's travels</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin">
+  <header class="a-top">
+    <a class="a-brand" href="./">✦ Tvishaa's travels <span>admin</span></a>
+    <nav class="seg" id="tabs" hidden>
+      <button data-tab="add" class="active">Add photos</button>
+      <button data-tab="manage">Manage</button>
+    </nav>
+    <div class="a-right">
+      <a class="a-link" href="./" target="_blank">View site ↗</a>
+      <button class="a-link" id="logout" hidden>Lock</button>
+    </div>
+  </header>
+
+  <!-- login -->
+  <section id="login" class="a-login" hidden>
+    <div class="card">
+      <p class="eyebrow">✦ Just for you</p>
+      <h1>Hi <i>Tvishaa</i></h1>
+      <p class="lead">Unlock with your GitHub key to add and edit photos. The key stays on this device only.</p>
+      <form id="login-form">
+        <input id="token" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false">
+        <button class="btn" type="submit">Unlock</button>
+      </form>
+      <p class="err" id="login-err"></p>
+      <details>
+        <summary>How do I get my key?</summary>
+        <ol>
+          <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">github.com → Settings → Fine-grained tokens → Generate new token</a>.</li>
+          <li>Name it e.g. “travels admin”, set an expiry (up to a year).</li>
+          <li><b>Repository access</b>: “Only select repositories” → <b><span class="repo-name"></span></b>.</li>
+          <li><b>Permissions</b> → Repository permissions → <b>Contents: Read and write</b>.</li>
+          <li>Generate, copy the key, paste it here. Do this once per device.</li>
+        </ol>
+      </details>
+    </div>
+  </section>
+
+  <!-- add photos -->
+  <section id="tab-add" class="a-main" hidden>
+    <label class="drop" id="drop">
+      <input type="file" id="files" accept="image/*,.heic,.heif" multiple hidden>
+      <span class="drop-icon">＋</span>
+      <span class="drop-title">Drop photos here or <u>choose files</u></span>
+      <span class="drop-sub">Dates and locations are read from the photos. Camera shots without GPS get matched by time.</span>
+    </label>
+
+    <div id="cams" class="cams" hidden></div>
+    <div id="add-list" class="cards"></div>
+
+    <div class="dock" id="add-dock" hidden>
+      <span id="add-summary"></span>
+      <div class="dock-r">
+        <button class="btn ghost" id="add-clear">Clear</button>
+        <button class="btn" id="publish">Publish</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- manage -->
+  <section id="tab-manage" class="a-main" hidden>
+    <div class="m-bar">
+      <input id="search" type="search" placeholder="Search place, country, caption or date…">
+      <span id="m-count" class="muted"></span>
+    </div>
+    <div id="m-list" class="cards"></div>
+    <div class="dock" id="m-dock" hidden>
+      <span id="m-summary"></span>
+      <div class="dock-r">
+        <button class="btn ghost" id="m-undo">Undo all</button>
+        <button class="btn" id="m-save">Save changes</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script type="module" src="js/admin.js"></script>
+</body>
+</html>

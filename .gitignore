@@ -1,0 +1,4 @@
+node_modules/
+photos/
+scripts/.geocache.json
+.DS_Store

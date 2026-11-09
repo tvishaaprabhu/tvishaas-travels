@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tvishaa's travels</title>
+  <link rel="preload" href="vendor/fonts/fraunces-latin-full-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="vendor/fonts/fraunces-latin-full-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="vendor/fonts/instrument-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="vendor/leaflet/MarkerCluster.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="masthead" id="masthead">
+    <p class="eyebrow">✦ Tvishaa's travel journal</p>
+    <!-- Change the headline here -->
+    <h1>Postcards from <i>everywhere</i></h1>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <nav class="bar" id="bar">
+    <div class="seg" role="tablist" aria-label="View">
+      <button data-mode="grid">Grid</button>
+      <button data-mode="map">Map</button>
+    </div>
+    <div class="chips" id="sorts" aria-label="Order">
+      <button data-sort="shuffle">Shuffle</button>
+      <button data-sort="date">By date</button>
+      <button data-sort="location">By place</button>
+    </div>
+  </nav>
+
+  <main>
+    <section id="grid-view">
+      <div id="grid"></div>
+      <div id="sentinel"></div>
+      <p id="empty" class="empty" hidden>No photos yet. Put some in <code>photos/</code> and run <code>npm run build</code>.</p>
+    </section>
+
+    <section id="map-view" hidden>
+      <div id="map"></div>
+      <p id="map-note" class="map-note" hidden></p>
+    </section>
+  </main>
+
+  <div id="lightbox" class="lightbox" hidden>
+    <button class="lb-close" aria-label="Close">&times;</button>
+    <button class="lb-prev" aria-label="Previous">&#8249;</button>
+    <figure>
+      <img id="lb-img" alt="">
+      <figcaption id="lb-cap"></figcaption>
+    </figure>
+    <button class="lb-next" aria-label="Next">&#8250;</button>
+  </div>
+
+  <!-- Recolours the map tiles into the pastel palette -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="pastel-map" color-interpolation-filters="sRGB">
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer id="pastel-map-ct"><feFuncR type="table"/><feFuncG type="table"/><feFuncB type="table"/></feComponentTransfer>
+    </filter>
+  </svg>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/leaflet/leaflet.markercluster.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
