@@ -113,10 +113,20 @@ async function commit(message, prepare, onProgress = () => {}, blobCache = new M
 }
 
 // ---------- login ----------
+const READ_ONLY_KEY = 'This key can only read, not save. On GitHub, edit the key: Permissions → Repository permissions → Contents → "Read and write", then Update and unlock again.';
+const friendly = (e) => (e.status === 403 ? READ_ONLY_KEY : e.status === 401 ? 'Your key has expired or was removed. Press Lock and unlock with a new key.' : e.message);
+
 async function unlock(t) {
   token = t;
   const info = await gh(repoPath(''));
-  if (!info.permissions?.push) throw new Error("This key can't edit the repo. Give it Contents: Read and write.");
+  if (!info.permissions?.push) throw new Error("This GitHub account can't edit the repo.");
+  // The account may edit, but can this key? Saving a tiny loose object (invisible, changes nothing) tells us.
+  try {
+    await gh(repoPath('/git/blobs'), { method: 'POST', body: JSON.stringify({ content: '', encoding: 'utf-8' }) });
+  } catch (e) {
+    if (e.status === 403 || e.status === 404) throw new Error(READ_ONLY_KEY);
+    throw e;
+  }
   branch = info.default_branch || 'main';
   manifest = await readManifest(branch);
 }
@@ -406,7 +416,7 @@ $('#publish').onclick = async () => {
     const failed = items.length;
     toast([`✿ Published ${added} photo${added === 1 ? '' : 's'}${failed ? `. ${failed} couldn't be read` : ''}! The site updates in about a minute. `, a], !!failed && !added, 10000);
   } catch (e) {
-    toast(`Stopped: ${e.message}. ${added ? `${added} photos were published. ` : ''}Press Publish again to continue with the rest.`, true, 0);
+    toast(`Stopped: ${friendly(e)} ${added ? `${added} photos were published. ` : ''}Press Publish again to continue with the rest.`, true, 0);
   } finally {
     btn.disabled = false;
   }
@@ -516,7 +526,7 @@ $('#m-save').onclick = async () => {
     renderManage();
     toast('✿ Saved! The site updates in about a minute.', false, 7000);
   } catch (e) {
-    toast(`Couldn't save: ${e.message}`, true, 9000);
+    toast(`Couldn't save: ${friendly(e)}`, true, 0);
   } finally {
     btn.disabled = false;
   }
