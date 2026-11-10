@@ -121,3 +121,10 @@ details a { color: var(--rose-dk); }
 .bp-row { display: flex; gap: 8px; flex: 1 1 420px; max-width: 560px; }
 .bp-row input { flex: 1; min-width: 0; }
 @media (max-width: 700px) { .bp-row { flex-wrap: wrap; } .bp-row .btn { width: 100%; } }
+
+/* explains empty placeholders from the Photos app */
+.ph-help { margin: 22px 0 0; padding: 18px 22px; border-radius: 18px; background: var(--ink); color: var(--lavender-lt); font-size: 14px; }
+.ph-help h3 { margin: 0 0 6px; font: italic 600 20px var(--serif); color: var(--mimosa); }
+.ph-help p { margin: 0 0 8px; }
+.ph-help ol { margin: 0 0 8px; padding-left: 20px; line-height: 1.7; }
+.ph-help b { color: var(--linen); }

@@ -54,6 +54,16 @@
       <span class="drop-sub">Dates and locations are read from the photos. Camera photos without GPS get the location of phone photos taken around the same time.</span>
     </label>
 
+    <div id="placeholder-help" class="ph-help" hidden>
+      <h3><span id="ph-count"></span></h3>
+      <p>This happens when photos are dragged straight from the Mac <b>Photos</b> app into the browser: Photos hands over an empty stand-in instead of the picture. To fix it:</p>
+      <ol>
+        <li>In Photos, select the photos → <b>File → Export → Export Unmodified Original</b> → save them to a folder.</li>
+        <li>Here, click <b>choose files</b> and pick them from that folder (or drag them in from Finder).</li>
+      </ol>
+      <p>"Unmodified Original" also keeps each photo's location.</p>
+    </div>
+
     <form id="batch-place" class="batch-place" hidden>
       <div>
         <h3><span id="bp-count"></span> Where were they taken?</h3>

@@ -253,6 +253,13 @@ async function addFiles(files) {
     toast(`${isHeicFile(file) ? 'Converting HEIC photo' : 'Reading photo'} ${n + 1} of ${files.length}…`, false, 0);
     const buf = await file.arrayBuffer();
     const id = newId();
+    // Dragging straight from the Mac Photos app gives the browser an empty stand-in, not the photo
+    const head = new TextDecoder().decode(new Uint8Array(buf.slice(0, 8)));
+    if (head.startsWith('bplist') || buf.byteLength < 2000) {
+      items.push({ file, src: null, id, raw: { date: null, lat: null, lng: null }, camera: '', preview: '', placeholder: true,
+        error: 'Empty placeholder, not the photo', place: '', country: '', caption: '', edited: {} });
+      continue;
+    }
     const exif = await readExif(exifr, buf);
     const meta = normaliseExif(exif);
     // date + GPS come from the original file (exifr reads HEIC too); pixels from a format this browser can draw
@@ -329,13 +336,20 @@ function renderAdd() {
     img.append(x, badges);
     card.append(img);
     const body = el('div', 'pc-body');
-    body.append(el('div', 'pc-date', `${fmtDate(it.date)} · ${it.camera}`));
-    const row = el('div', 'pc-row');
-    row.append(input(it, 'place', 'Place'), input(it, 'country', 'Country'));
-    body.append(row, input(it, 'caption', 'Caption (optional)'));
+    if (it.src) {
+      body.append(el('div', 'pc-date', `${fmtDate(it.date)} · ${it.camera}`));
+      const row = el('div', 'pc-row');
+      row.append(input(it, 'place', 'Place'), input(it, 'country', 'Country'));
+      body.append(row, input(it, 'caption', 'Caption (optional)'));
+    } else {
+      body.append(el('div', 'pc-date', it.file.name));
+    }
     card.append(body);
     list.append(card);
   }
+  const ph = items.filter((i) => i.placeholder).length;
+  $('#placeholder-help').hidden = !ph;
+  $('#ph-count').textContent = `${ph} of these ${ph === 1 ? 'is an empty placeholder' : 'are empty placeholders'}, not photos.`;
   const noLoc = items.filter((i) => i.src && i.lat == null && !i.place);
   $('#batch-place').hidden = !noLoc.length;
   $('#bp-count').textContent = `${noLoc.length} photo${noLoc.length === 1 ? ' has' : 's have'} no location.`;
