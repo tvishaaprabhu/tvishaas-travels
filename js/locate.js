@@ -99,3 +99,23 @@ export async function forwardGeocode(query, headers = {}) {
   return j[0] ? { lat: +(+j[0].lat).toFixed(5), lng: +(+j[0].lon).toFixed(5) } : null;
 }
 
+
+// Read date/camera/GPS from any photo. `exifr` is passed in (Node and the browser load it differently).
+// Some HEIC files store their position table in a way exifr misreads, so if it finds nothing we look
+// for the "Exif\0\0" + TIFF block ourselves and read that directly.
+export async function readExif(exifr, buf) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const read = async (data) => ({
+    ...((await exifr.parse(data, { reviveValues: false, pick: EXIF_PICK })) || {}),
+    ...((await exifr.gps(data)) || {}),
+  });
+  const useful = (r) => r && (r.DateTimeOriginal || r.CreateDate || Number.isFinite(r.latitude));
+  try { const r = await read(u8); if (useful(r)) return r; } catch {}
+  for (let i = 0; i < u8.length - 8; i++) {
+    if (u8[i] === 0x45 && u8[i + 1] === 0x78 && u8[i + 2] === 0x69 && u8[i + 3] === 0x66 && u8[i + 4] === 0 && u8[i + 5] === 0 &&
+        ((u8[i + 6] === 0x4d && u8[i + 7] === 0x4d) || (u8[i + 6] === 0x49 && u8[i + 7] === 0x49))) {
+      try { const r = await read(u8.slice(i + 6)); if (useful(r)) return r; } catch {}
+    }
+  }
+  return {};
+}

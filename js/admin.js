@@ -1,5 +1,5 @@
 import exifr from '../vendor/exifr/exifr.mjs';
-import { EXIF_PICK, toMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode, forwardGeocode } from './locate.js';
+import { readExif, toMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode, forwardGeocode } from './locate.js';
 
 // ---------- config ----------
 // On GitHub Pages (https://<owner>.github.io/<repo>/) the repo is detected automatically.
@@ -193,6 +193,29 @@ async function analyse(file) {
   return { preview: URL.createObjectURL(blob) };
 }
 
+// ---------- HEIC (iPhone) photos ----------
+// Safari can open HEIC itself; other browsers can't, so we convert with heic-to, a free open-source
+// decoder that runs on this device (loaded only when a HEIC photo is picked). The result is a JPEG
+// up to LARGE_W wide, which is all the site ever needs.
+const isHeicFile = (f) => /\.(heic|heif)$/i.test(f.name) || /image\/hei[cf]/i.test(f.type);
+let heicLib = null;
+async function decodable(file) {
+  if (!isHeicFile(file)) return file;
+  try { (await createImageBitmap(file)).close?.(); return file; } catch { /* not natively supported */ }
+  heicLib ||= import('../vendor/heic/heic-to.js');
+  const { heicTo } = await heicLib;
+  const bmp = await heicTo({ blob: file, type: 'bitmap' });
+  const scale = Math.min(1, LARGE_W / bmp.width, LARGE_W / bmp.height);
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+  g.drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close?.();
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92));
+  c.width = c.height = 0;
+  return new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+}
+
 // Resize with good quality (halving steps), returns { blob, w, h }. Output has no metadata.
 async function resize(file, maxW, maxH, quality) {
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -227,16 +250,17 @@ drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); addFil
 async function addFiles(files) {
   if (!files.length) return;
   for (const [n, file] of files.entries()) {
-    toast(`Reading photo ${n + 1} of ${files.length}…`, false, 0);
+    toast(`${isHeicFile(file) ? 'Converting HEIC photo' : 'Reading photo'} ${n + 1} of ${files.length}…`, false, 0);
     const buf = await file.arrayBuffer();
     const id = newId();
-    let exif = {};
-    try { exif = { ...(await exifr.parse(buf, { reviveValues: false, pick: EXIF_PICK })), ...(await exifr.gps(buf)) }; } catch {}
+    const exif = await readExif(exifr, buf);
     const meta = normaliseExif(exif);
-    let fp = {};
-    try { fp = await analyse(file); } catch {}
+    // date + GPS come from the original file (exifr reads HEIC too); pixels from a format this browser can draw
+    let src = null, fp = {};
+    try { src = await decodable(file); fp = await analyse(src); } catch { src = null; }
     items.push({
-      file, id, raw: meta, camera: meta.camera, preview: fp.preview || URL.createObjectURL(file),
+      file, src, id, raw: meta, camera: meta.camera, preview: fp.preview || '',
+      error: src ? null : (isHeicFile(file) ? "Couldn't convert this HEIC photo" : "Couldn't read this image"),
       place: '', country: '', caption: '', edited: {},
     });
   }
@@ -312,10 +336,10 @@ function renderAdd() {
     card.append(body);
     list.append(card);
   }
-  const noLoc = items.filter((i) => i.lat == null && !i.place);
+  const noLoc = items.filter((i) => i.src && i.lat == null && !i.place);
   $('#batch-place').hidden = !noLoc.length;
   $('#bp-count').textContent = `${noLoc.length} photo${noLoc.length === 1 ? ' has' : 's have'} no location.`;
-  const n = items.length;
+  const n = items.filter((i) => i.src).length;
   const unplaced = noLoc.length;
   $('#add-dock').hidden = !items.length;
   $('#add-summary').textContent = `${n} new photo${n === 1 ? '' : 's'}` + (unplaced ? ` · ${unplaced} without a place (still fine)` : '');
@@ -353,7 +377,7 @@ $('#add-clear').onclick = () => { items.forEach((i) => URL.revokeObjectURL(i.pre
 const CHUNK = 30; // photos per commit: keeps memory low and lets a big upload resume if it stops halfway
 
 $('#publish').onclick = async () => {
-  const todo = items.slice();
+  const todo = items.filter((i) => i.src); // unreadable photos stay listed with their error
   if (!todo.length) return;
   const btn = $('#publish');
   btn.disabled = true;
@@ -379,10 +403,11 @@ $('#publish').onclick = async () => {
         toast(`Preparing photo ${start + n + 1} of ${todo.length}…`, false, 0);
         let t, l;
         try {
-          t = await resize(it.file, THUMB_W, THUMB_W * 3, 0.82);
-          l = await resize(it.file, LARGE_W, LARGE_W, 0.85);
+          if (!it.src) throw new Error('unreadable');
+          t = await resize(it.src, THUMB_W, THUMB_W * 3, 0.82);
+          l = await resize(it.src, LARGE_W, LARGE_W, 0.85);
         } catch {
-          it.error = /hei[cf]/i.test(it.file.name) ? 'HEIC: open this page in Safari, or export as JPEG' : "Couldn't read this image";
+          it.error ||= "Couldn't read this image";
           continue;
         }
         const thumb = `images/thumbs/${it.id}.jpg`, large = `images/large/${it.id}.jpg`;

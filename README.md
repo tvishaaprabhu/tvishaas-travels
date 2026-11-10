@@ -25,8 +25,10 @@ Only someone with a key for this repo can publish; everyone else just sees a log
 Web copies are resized and have all hidden metadata (including GPS) removed. Only the
 location on the map is public.
 
-**iPhone tips**: open the admin page in Safari (it can read HEIC photos). If location is missing,
-in the Photos picker tap *Options* → turn on *Location*, or just type the place name.
+**iPhone (HEIC) photos** work in any browser: they're converted on your device by a free, open-source
+decoder (heic-to) before uploading. If a photo has no location, it was probably stripped when it was shared or
+exported: on a Mac, export from Photos with File → Export → *Export Unmodified Original* to keep it; on an
+iPhone, tap *Options* → turn on *Location* in the photo picker.
 
 ## How locations are worked out
 - Photos with GPS: the city/country is looked up on OpenStreetMap (or reused from a nearby photo).

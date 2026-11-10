@@ -13,7 +13,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import exifr from 'exifr';
 import sharp from 'sharp';
-import { EXIF_PICK, toMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode } from '../js/locate.js';
+import heicConvert from 'heic-convert';
+import { readExif, toMs, normaliseExif, inferLocations, nearbyPlace, reverseGeocode } from '../js/locate.js';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const INBOX = path.join(ROOT, 'photos');
@@ -46,14 +47,19 @@ async function main() {
   for (const [i, file] of files.entries()) {
     process.stdout.write(`\r${i + 1}/${files.length} ${path.basename(file).slice(-40).padEnd(40)}`);
     const buf = await fs.readFile(file);
+    // sharp can't open HEIC (iPhone) photos, so convert those to JPEG pixels first (free, runs locally)
+    let pixels = buf;
+    if (/\.(heic|heif)$/i.test(file)) {
+      try { pixels = Buffer.from(await heicConvert({ buffer: buf, format: 'JPEG', quality: 0.92 })); }
+      catch (e) { failed.push(`${file}: couldn't convert HEIC (${e.message})`); continue; }
+    }
     const id = crypto.randomBytes(6).toString('hex');
     try {
       const thumb = `images/thumbs/${id}.webp`, large = `images/large/${id}.jpg`;
       // sharp drops all metadata (incl. GPS) from the web copies
-      const t = await sharp(buf).rotate().resize({ width: THUMB_W, withoutEnlargement: true }).webp({ quality: 78 }).toFile(path.join(ROOT, thumb));
-      await sharp(buf).rotate().resize({ width: LARGE_W, height: LARGE_W, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 84, mozjpeg: true }).toFile(path.join(ROOT, large));
-      let exif = {};
-      try { exif = { ...(await exifr.parse(buf, { reviveValues: false, pick: EXIF_PICK })), ...(await exifr.gps(buf)) }; } catch {}
+      const t = await sharp(pixels).rotate().resize({ width: THUMB_W, withoutEnlargement: true }).webp({ quality: 78 }).toFile(path.join(ROOT, thumb));
+      await sharp(pixels).rotate().resize({ width: LARGE_W, height: LARGE_W, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 84, mozjpeg: true }).toFile(path.join(ROOT, large));
+      const exif = await readExif(exifr, buf);
       const meta = normaliseExif(exif);
       const folder = path.relative(INBOX, path.dirname(file)).split(path.sep)[0] || null;
       added.push({ id, src: path.basename(file), thumb, large, w: t.width, h: t.height, ...meta, place: null, country: null, caption: null, folder });
